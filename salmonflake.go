@@ -16,13 +16,21 @@ type Salmonflake struct {
 	machineID dtype.MachineID
 }
 
-func New(conf config.Config) {
+func New(conf config.Config) Salmonflake {
 	if err := validate(conf); err != nil {
 		panic("initialization error")
 	}
 
 	if conf.Start.IsZero() {
 		conf.Start = config.DefaultStart
+	}
+
+	// TODO: set parameters.
+	return Salmonflake{
+		start:     uint64(conf.Start.Unix()),
+		elapsed:   0,
+		sequence:  0,
+		machineID: 0,
 	}
 }
 
@@ -38,5 +46,6 @@ func validate(conf config.Config) error {
 
 // NextID generates a next unique ID.
 func (s *Salmonflake) NextID() (uint64, error) {
+	// TODO: generates a next unique ID.
 	return 0, nil
 }
