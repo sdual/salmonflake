@@ -11,5 +11,8 @@ func TestInitializeSalmonflakeWithWrongConf(t *testing.T) {
 		MachineID: "Machine",
 	}
 	// TODO: check initalization is falied.
-	_ = New(conf)
+	sf, err := New(conf)
+	if err != nil {
+
+	}
 }
