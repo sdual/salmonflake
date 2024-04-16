@@ -10,15 +10,15 @@ import (
 
 // Salmonflake is a distributed parallel Snowflake ID generator.
 type Salmonflake struct {
-	start     dtype.Time
-	elapsed   dtype.Time
+	start     dtype.Msec
+	elapsed   dtype.Msec
 	sequence  dtype.Sequence
 	machineID dtype.MachineID
 }
 
-func New(conf config.Config) Salmonflake {
+func New(conf config.Config) (*Salmonflake, error) {
 	if err := validate(conf); err != nil {
-		panic("initialization error")
+		return nil, err
 	}
 
 	if conf.Start.IsZero() {
@@ -26,12 +26,12 @@ func New(conf config.Config) Salmonflake {
 	}
 
 	// TODO: set parameters.
-	return Salmonflake{
+	return &Salmonflake{
 		start:     uint64(conf.Start.Unix()),
 		elapsed:   0,
 		sequence:  0,
 		machineID: 0,
-	}
+	}, nil
 }
 
 func validate(conf config.Config) error {
@@ -45,7 +45,7 @@ func validate(conf config.Config) error {
 }
 
 // NextID generates a next unique ID.
-func (s *Salmonflake) NextID() (uint64, error) {
+func (s Salmonflake) NextID() (uint64, error) {
 	// TODO: generates a next unique ID.
 	return 0, nil
 }
