@@ -2,50 +2,103 @@ package salmonflake
 
 import (
 	"fmt"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/sdual/salmonflake/config"
 	"github.com/sdual/salmonflake/dtype"
 )
 
-// Salmonflake is a distributed parallel Snowflake ID generator.
+const (
+	sequenceBits = 12
+	machineBits  = 10
+	maxSequence  = 1<<sequenceBits - 1
+	maxMachineID = 1<<machineBits - 1
+	maxElapsed   = 1<<41 - 1
+)
+
+// Salmonflake is a concurrency-safe Snowflake ID generator.
+// A Salmonflake must not be copied after first use. Each active generator
+// must have a distinct machine ID and share the same epoch.
 type Salmonflake struct {
-	start     dtype.Time
+	mu        sync.Mutex
+	start     int64
 	elapsed   dtype.Time
 	sequence  dtype.Sequence
 	machineID dtype.MachineID
+	started   bool
+	now       func() time.Time
+	sleep     func(time.Duration)
 }
 
-func New(conf config.Config) Salmonflake {
-	if err := validate(conf); err != nil {
-		panic("initialization error")
-	}
-
+// New constructs a generator and panics if conf is invalid.
+// MachineID must be a decimal integer between 0 and 1023.
+func New(conf config.Config) *Salmonflake {
 	if conf.Start.IsZero() {
 		conf.Start = config.DefaultStart
 	}
+	if err := validate(conf); err != nil {
+		panic(fmt.Errorf("initialization error: %w", err))
+	}
+	machineID, _ := strconv.ParseUint(conf.MachineID, 10, machineBits)
 
-	// TODO: set parameters.
-	return Salmonflake{
-		start:     uint64(conf.Start.Unix()),
-		elapsed:   0,
-		sequence:  0,
-		machineID: 0,
+	return &Salmonflake{
+		start:     conf.Start.UnixMilli(),
+		machineID: dtype.MachineID(machineID),
+		now:       time.Now,
+		sleep:     time.Sleep,
 	}
 }
 
 func validate(conf config.Config) error {
-	if conf.Start.After(time.Now()) {
+	now := time.Now()
+	if conf.Start.After(now) {
 		return fmt.Errorf(
 			"the start time must be before the current time. start time: %s",
 			conf.Start.Format("2006-01-02T15:04:05Z07:00"),
 		)
 	}
+	if conf.Start.Before(now.Add(-time.Duration(maxElapsed) * time.Millisecond)) {
+		return fmt.Errorf("the start time exceeds the 41-bit timestamp range")
+	}
+	if _, err := strconv.ParseUint(conf.MachineID, 10, machineBits); err != nil {
+		return fmt.Errorf("machine ID must be a decimal integer between 0 and %d: %w", maxMachineID, err)
+	}
 	return nil
 }
 
-// NextID generates a next unique ID.
+// NextID generates an ID with a 41-bit millisecond timestamp, a 10-bit machine
+// ID, and a 12-bit sequence. It waits for the next millisecond when the sequence
+// is exhausted, and returns an error if the clock moves backwards or the
+// timestamp no longer fits in 41 bits.
 func (s *Salmonflake) NextID() (uint64, error) {
-	// TODO: generates a next unique ID.
-	return 0, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.now == nil {
+		return 0, fmt.Errorf("generator must be initialized with New")
+	}
+	for {
+		timestamp := s.now().UnixMilli()
+		if timestamp < s.start || (s.started && timestamp < s.start+int64(s.elapsed)) {
+			return 0, fmt.Errorf("clock moved backwards")
+		}
+		elapsed := uint64(timestamp) - uint64(s.start)
+		if elapsed > maxElapsed {
+			return 0, fmt.Errorf("timestamp exceeds the 41-bit range")
+		}
+		if s.started && elapsed == s.elapsed {
+			if s.sequence == maxSequence {
+				s.sleep(time.Millisecond)
+				continue
+			}
+			s.sequence++
+		} else {
+			s.sequence = 0
+		}
+		s.elapsed = elapsed
+		s.started = true
+		return elapsed<<(machineBits+sequenceBits) |
+			uint64(s.machineID)<<sequenceBits | uint64(s.sequence), nil
+	}
 }
