@@ -32,7 +32,7 @@ type Salmonflake struct {
 	sleep     func(time.Duration)
 }
 
-// New constructs a generator and panics if conf is invalid.
+// New constructs a generator and returns an error if cfg is invalid.
 // MachineID must be a decimal integer between 0 and 1023.
 func New(cfg config.Config) (*Salmonflake, error) {
 	if cfg.Start.IsZero() {

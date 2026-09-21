@@ -21,18 +21,22 @@ func TestNewInvalidConfig(t *testing.T) {
 		{"expired epoch", config.Config{MachineID: "0", Start: time.Now().Add(-time.Duration(maxElapsed+1000) * time.Millisecond)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			defer func() {
-				if recover() == nil {
-					t.Fatal("expected initialization to panic")
-				}
-			}()
-			New(tc.conf)
+			s, err := New(tc.conf)
+			if err == nil {
+				t.Fatal("expected initialization error")
+			}
+			if s != nil {
+				t.Fatal("expected nil generator for invalid config")
+			}
 		})
 	}
 }
 
 func TestNewDefaults(t *testing.T) {
-	s := New(config.Config{MachineID: "1023"})
+	s, err := New(config.Config{MachineID: "1023"})
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
 	if s.start != config.DefaultStart.UnixMilli() || s.machineID != 1023 {
 		t.Fatalf("unexpected initialization: start=%d machine=%d", s.start, s.machineID)
 	}
@@ -40,7 +44,10 @@ func TestNewDefaults(t *testing.T) {
 
 func TestNextIDLayoutAndSequence(t *testing.T) {
 	epoch := time.Now().Add(-time.Hour).Truncate(time.Millisecond)
-	s := New(config.Config{Start: epoch, MachineID: "42"})
+	s, err := New(config.Config{Start: epoch, MachineID: "42"})
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
 	now := epoch.Add(123 * time.Millisecond)
 	s.now = func() time.Time { return now }
 	for sequence := uint64(0); sequence < 3; sequence++ {
@@ -59,7 +66,10 @@ func TestNextIDLayoutAndSequence(t *testing.T) {
 
 func TestNextIDSequenceExhaustion(t *testing.T) {
 	epoch := time.Now().Add(-time.Hour).Truncate(time.Millisecond)
-	s := New(config.Config{Start: epoch, MachineID: "0"})
+	s, err := New(config.Config{Start: epoch, MachineID: "0"})
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
 	now := epoch
 	s.now = func() time.Time { return now }
 	waits := 0
@@ -81,12 +91,15 @@ func TestNextIDSequenceExhaustion(t *testing.T) {
 
 func TestNextIDClockRollback(t *testing.T) {
 	epoch := time.Now().Add(-time.Hour).Truncate(time.Millisecond)
-	s := New(config.Config{Start: epoch, MachineID: "1"})
+	s, err := New(config.Config{Start: epoch, MachineID: "1"})
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
 	now := epoch.Add(time.Second)
 	s.now = func() time.Time { return now }
 	first, err := s.NextID()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("NextID() failed: %v", err)
 	}
 	for _, backwards := range []time.Time{now.Add(-time.Millisecond), epoch.Add(-time.Millisecond)} {
 		now = backwards
@@ -103,7 +116,10 @@ func TestNextIDClockRollback(t *testing.T) {
 
 func TestNextIDTimestampLimit(t *testing.T) {
 	epoch := time.Now().Add(-time.Hour).Truncate(time.Millisecond)
-	s := New(config.Config{Start: epoch, MachineID: "1023"})
+	s, err := New(config.Config{Start: epoch, MachineID: "1023"})
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
 	now := epoch.Add(time.Duration(maxElapsed) * time.Millisecond)
 	s.now = func() time.Time { return now }
 	var id uint64
@@ -111,7 +127,7 @@ func TestNextIDTimestampLimit(t *testing.T) {
 		var err error
 		id, err = s.NextID()
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("NextID() at sequence %d failed: %v", i, err)
 		}
 	}
 	if id != 1<<63-1 {
@@ -127,7 +143,10 @@ func TestNextIDDistinctMachines(t *testing.T) {
 	epoch := time.Now().Add(-time.Hour)
 	ids := make(map[uint64]bool)
 	for _, machine := range []string{"0", "1", "1023"} {
-		s := New(config.Config{Start: epoch, MachineID: machine})
+		s, err := New(config.Config{Start: epoch, MachineID: machine})
+		if err != nil {
+			t.Fatalf("New() for machine %s failed: %v", machine, err)
+		}
 		s.now = func() time.Time { return epoch.Add(time.Second) }
 		id, err := s.NextID()
 		if err != nil || ids[id] {
@@ -139,7 +158,10 @@ func TestNextIDDistinctMachines(t *testing.T) {
 
 func TestNextIDConcurrent(t *testing.T) {
 	const workers, count = 16, 1000
-	s := New(config.Config{MachineID: "1"})
+	s, err := New(config.Config{MachineID: "1"})
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
 	ids := make(chan uint64, workers*count)
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
@@ -150,7 +172,7 @@ func TestNextIDConcurrent(t *testing.T) {
 			for j := 0; j < count; j++ {
 				id, err := s.NextID()
 				if err != nil {
-					t.Error(err)
+					t.Errorf("NextID() at iteration %d failed: %v", j, err)
 					return
 				}
 				if j > 0 && id <= previous {
