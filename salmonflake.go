@@ -34,21 +34,24 @@ type Salmonflake struct {
 
 // New constructs a generator and panics if conf is invalid.
 // MachineID must be a decimal integer between 0 and 1023.
-func New(conf config.Config) *Salmonflake {
-	if conf.Start.IsZero() {
-		conf.Start = config.DefaultStart
+func New(cfg config.Config) (*Salmonflake, error) {
+	if cfg.Start.IsZero() {
+		cfg.Start = config.DefaultStart
 	}
-	if err := validate(conf); err != nil {
-		panic(fmt.Errorf("initialization error: %w", err))
+	if err := validate(cfg); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
 	}
-	machineID, _ := strconv.ParseUint(conf.MachineID, 10, machineBits)
+	machineID, err := strconv.ParseUint(cfg.MachineID, 10, machineBits)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse MachineID: %w", err)
+	}
 
 	return &Salmonflake{
-		start:     conf.Start.UnixMilli(),
+		start:     cfg.Start.UnixMilli(),
 		machineID: dtype.MachineID(machineID),
 		now:       time.Now,
 		sleep:     time.Sleep,
-	}
+	}, nil
 }
 
 func validate(conf config.Config) error {
